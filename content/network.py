@@ -9,6 +9,25 @@ CHZZK_API = "https://api.chzzk.naver.com"
 VIDEOHUB_API = "https://api-videohub.naver.com"
 
 class NetworkManager:
+    @staticmethod
+    def _parse_resolution(width, height):
+        if width is None or height is None:
+            return None
+
+        try:
+            return min(int(width), int(height))
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _select_auto_rep(reps):
+        sorted_reps = sorted(reps, key=lambda x: x[0])
+        if not sorted_reps:
+            return [], None, None
+
+        auto_resolution = sorted_reps[-1][0]
+        auto_base_url = sorted_reps[-1][1]
+        return sorted_reps, auto_resolution, auto_base_url
 
     @staticmethod
     def extract_content_no(vod_url: str) -> tuple[str, str]:
@@ -72,17 +91,18 @@ class NetworkManager:
         for rep in root.findall(".//mpd:Representation", namespaces=ns):
             width = rep.get('width')
             height = rep.get('height')
-            resolution = min(int(width), int(height))
+            resolution = NetworkManager._parse_resolution(width, height)
+            if resolution is None:
+                continue
             # print(width, height) # Debugging
             # print(f"Resolution: {resolution}") # Debugging
-            base_url = rep.find(".//mpd:BaseURL", namespaces=ns).text
-            if base_url.endswith('/hls/'):
+            base_url_tag = rep.find(".//mpd:BaseURL", namespaces=ns)
+            base_url = base_url_tag.text if base_url_tag is not None else None
+            if not base_url or base_url.endswith('/hls/'):
                 continue
             reps.append([resolution, base_url])
         
-        sorted_reps = sorted(reps, key=lambda x: x[0])
-        auto_resolution = sorted_reps[-1][0]
-        auto_base_url = sorted_reps[-1][1]
+        sorted_reps, auto_resolution, auto_base_url = NetworkManager._select_auto_rep(reps)
 
         # 중복 제거한 뒤, 리스트로 변환
         return sorted_reps, auto_resolution, auto_base_url
@@ -99,13 +119,13 @@ class NetworkManager:
         for encoding in encoding_track:
             width = encoding.get("videoWidth")
             height = encoding.get("videoHeight")
-            resolution = min(int(width), int(height))
+            resolution = NetworkManager._parse_resolution(width, height)
+            if resolution is None:
+                continue
             base_url = None
             reps.append([resolution, base_url])
 
-        sorted_reps = sorted(reps, key=lambda x: x[0])
-        auto_resolution = sorted_reps[-1][0]
-        auto_base_url = sorted_reps[-1][1]
+        sorted_reps, auto_resolution, auto_base_url = NetworkManager._select_auto_rep(reps)
         return sorted_reps, auto_resolution, auto_base_url
     
     @staticmethod
@@ -186,12 +206,10 @@ class NetworkManager:
             height = encoding.get("height")
             source_url = video.get("source")
 
-            if width and height and source_url:
-                resolution = min(int(width), int(height))
+            resolution = NetworkManager._parse_resolution(width, height)
+            if resolution is not None and source_url:
                 resolutions.append([resolution, source_url])
 
-        sorted_resolutions = sorted(resolutions, key=lambda x: x[0])
-        auto_resolution = sorted_resolutions[-1][0]
-        auto_base_url = sorted_resolutions[-1][1]
+        sorted_resolutions, auto_resolution, auto_base_url = NetworkManager._select_auto_rep(resolutions)
 
         return sorted_resolutions, auto_resolution, auto_base_url, None
